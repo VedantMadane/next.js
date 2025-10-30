@@ -1,4 +1,4 @@
-import { codeFrameColumns } from 'next/dist/compiled/babel/code-frame'
+import { codeFrameColumns } from '../../shared/lib/errors/code-frame'
 import isInternal from '../../shared/lib/is-internal'
 import type { StackFrame } from '../../server/lib/parse-stack'
 import { ignoreListAnonymousStackFramesIfSandwiched as ignoreListAnonymousStackFramesIfSandwichedGeneric } from '../../server/lib/source-maps'
@@ -68,7 +68,7 @@ export function getOriginalCodeFrame(
   source: string | null,
   colors: boolean = process.stdout.isTTY
 ): string | null {
-  if (!source || isInternal(frame.file)) {
+  if (!source || isInternal(frame.file) || frame.line1 == null) {
     return null
   }
 
@@ -76,8 +76,7 @@ export function getOriginalCodeFrame(
     source,
     {
       start: {
-        // 1-based, but -1 means start line without highlighting
-        line: frame.line1 ?? -1,
+        line: frame.line1,
         // 1-based, but 0 means whole line without column highlighting
         column: frame.column1 ?? 0,
       },
