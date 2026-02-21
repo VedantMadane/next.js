@@ -38,7 +38,10 @@ import {
   EntryStatus,
 } from '../segment-cache/cache'
 import { discoverKnownRoute } from '../segment-cache/optimistic-routes'
-import type { NormalizedSearch } from '../segment-cache/cache-key'
+import type {
+  NormalizedNextUrl,
+  NormalizedSearch,
+} from '../segment-cache/cache-key'
 import {
   getRenderedSearchFromVaryPath,
   type PageVaryPath,
@@ -1473,6 +1476,7 @@ function dispatchRetryDueToTreeMismatch(
       discoverKnownRoute(
         now,
         retryUrl.pathname,
+        retryNextUrl as NormalizedNextUrl | null,
         null,
         seed.routeTree,
         metadataVaryPath,

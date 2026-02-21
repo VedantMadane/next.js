@@ -602,8 +602,12 @@ async function generateDynamicRSCPayload(
   }
 
   const varyHeader = ctx.res.getHeader('vary')
+  // In dev, the Vary header may not reliably reflect whether a route can
+  // be intercepted, because interception routes are compiled on demand.
+  // Default to true so the client doesn't cache a stale Fallback entry.
   const couldBeIntercepted =
-    typeof varyHeader === 'string' && varyHeader.includes(NEXT_URL)
+    !!process.env.__NEXT_DEV_SERVER ||
+    (typeof varyHeader === 'string' && varyHeader.includes(NEXT_URL))
 
   // If we have an action result, then this is a server action response.
   // We can rely on this because `ActionResult` will always be a promise, even if
@@ -1574,12 +1578,14 @@ async function getRSCPayload(
     MetadataOutlet,
   })
 
-  // When the `vary` response header is present with `Next-URL`, that means there's a chance
-  // it could respond differently if there's an interception route. We provide this information
-  // to `AppRouter` so that it can properly seed the prefetch cache with a prefix, if needed.
+  // Determine whether this route could be intercepted based on the Vary header.
+  // In dev, the Vary header may not reliably reflect whether a route can be
+  // intercepted, because interception routes are compiled on demand. Default to
+  // true so the client doesn't cache a stale Fallback entry.
   const varyHeader = ctx.res.getHeader('vary')
   const couldBeIntercepted =
-    typeof varyHeader === 'string' && varyHeader.includes(NEXT_URL)
+    !!process.env.__NEXT_DEV_SERVER ||
+    (typeof varyHeader === 'string' && varyHeader.includes(NEXT_URL))
 
   const initialHead = createElement(
     Fragment,

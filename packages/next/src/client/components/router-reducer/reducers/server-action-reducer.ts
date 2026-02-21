@@ -55,7 +55,10 @@ import {
   navigate,
 } from '../../segment-cache/navigation'
 import { discoverKnownRoute } from '../../segment-cache/optimistic-routes'
-import type { NormalizedSearch } from '../../segment-cache/cache-key'
+import type {
+  NormalizedNextUrl,
+  NormalizedSearch,
+} from '../../segment-cache/cache-key'
 import {
   ActionDidNotRevalidate,
   ActionDidRevalidateDynamicOnly,
@@ -419,6 +422,7 @@ export function serverActionReducer(
           discoverKnownRoute(
             now,
             redirectUrl.pathname,
+            nextUrl as NormalizedNextUrl | null,
             null, // No pending entry
             redirectSeed.routeTree,
             metadataVaryPath,

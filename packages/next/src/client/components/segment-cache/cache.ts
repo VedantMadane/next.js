@@ -55,6 +55,7 @@ import {
 } from './vary-path'
 import { createHrefFromUrl } from '../router-reducer/create-href-from-url'
 import type {
+  NormalizedNextUrl,
   NormalizedPathname,
   NormalizedSearch,
   RouteCacheKey,
@@ -1082,6 +1083,7 @@ export function fulfillRouteCacheEntry(
 export function writeRouteIntoCache(
   now: number,
   pathname: NormalizedPathname,
+  nextUrl: NormalizedNextUrl | null,
   tree: RouteTree,
   metadataVaryPath: PageVaryPath,
   couldBeIntercepted: boolean,
@@ -1102,7 +1104,7 @@ export function writeRouteIntoCache(
   const varyPath = getFulfilledRouteVaryPath(
     pathname,
     renderedSearch,
-    null,
+    nextUrl,
     couldBeIntercepted
   )
   const isRevalidation = false
@@ -1745,6 +1747,7 @@ export async function fetchRouteOnCacheMiss(
       discoverKnownRoute(
         Date.now(),
         pathname,
+        nextUrl,
         entry,
         routeTree,
         metadataVaryPath,
@@ -1803,7 +1806,8 @@ export async function fetchRouteOnCacheMiss(
         canonicalUrl,
         routeIsPPREnabled,
         headVaryParams,
-        pathname
+        pathname,
+        nextUrl
       )
     }
 
@@ -2139,7 +2143,8 @@ function writeDynamicTreeResponseIntoCache(
   canonicalUrl: string,
   routeIsPPREnabled: boolean,
   headVaryParams: VaryParams | null,
-  originalPathname: string
+  originalPathname: string,
+  nextUrl: NormalizedNextUrl | null
 ): void {
   const renderedSearch = getRenderedSearch(response)
 
@@ -2188,6 +2193,7 @@ function writeDynamicTreeResponseIntoCache(
   const fulfilledEntry = discoverKnownRoute(
     now,
     originalPathname,
+    nextUrl,
     entry,
     routeTree,
     metadataVaryPath,

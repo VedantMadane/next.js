@@ -24,7 +24,11 @@ import {
   type FulfilledRouteCacheEntry,
 } from './cache'
 import { discoverKnownRoute } from './optimistic-routes'
-import { createCacheKey, type NormalizedSearch } from './cache-key'
+import {
+  createCacheKey,
+  type NormalizedNextUrl,
+  type NormalizedSearch,
+} from './cache-key'
 import { schedulePrefetchTask } from './scheduler'
 import { PrefetchPriority, FetchStrategy } from './types'
 import { getLinkForCurrentNavigation } from '../links'
@@ -392,6 +396,7 @@ async function navigateToUnknownRoute(
     const fulfilledRoute = discoverKnownRoute(
       now,
       url.pathname,
+      nextUrl as NormalizedNextUrl | null,
       null, // No pending entry
       navigationSeed.routeTree,
       metadataVaryPath,

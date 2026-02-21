@@ -49,7 +49,11 @@ import {
   createMetadataRouteTree,
 } from './cache'
 import { doesStaticSegmentAppearInURL } from '../../route-params'
-import type { NormalizedPathname, NormalizedSearch } from './cache-key'
+import type {
+  NormalizedNextUrl,
+  NormalizedPathname,
+  NormalizedSearch,
+} from './cache-key'
 import {
   appendLayoutVaryPath,
   finalizeLayoutVaryPath,
@@ -167,6 +171,7 @@ let knownRouteTreeRoot: KnownRoutePart = createEmptyPart()
 export function discoverKnownRoute(
   now: number,
   pathname: string,
+  nextUrl: NormalizedNextUrl | null,
   pendingEntry: PendingRouteCacheEntry | null,
   routeTree: RouteTree,
   metadataVaryPath: PageVaryPath,
@@ -206,6 +211,7 @@ export function discoverKnownRoute(
       fulfilledEntry,
       now,
       pathname,
+      nextUrl,
       tree,
       metadataVaryPath,
       couldBeIntercepted,
@@ -226,6 +232,7 @@ export function discoverKnownRoute(
     null,
     now,
     pathname,
+    nextUrl,
     tree,
     metadataVaryPath,
     couldBeIntercepted,
@@ -281,6 +288,7 @@ function discoverKnownRoutePart(
   // These are passed through unchanged for entry creation at the leaf
   now: number,
   pathname: string,
+  nextUrl: NormalizedNextUrl | null,
   fullTree: RouteTree,
   metadataVaryPath: PageVaryPath,
   couldBeIntercepted: boolean,
@@ -321,6 +329,7 @@ function discoverKnownRoutePart(
       return writeRouteIntoCache(
         now,
         pathname as NormalizedPathname,
+        nextUrl,
         fullTree,
         metadataVaryPath,
         couldBeIntercepted,
@@ -399,6 +408,7 @@ function discoverKnownRoutePart(
         existingEntry,
         now,
         pathname,
+        nextUrl,
         fullTree,
         metadataVaryPath,
         couldBeIntercepted,
@@ -421,6 +431,7 @@ function discoverKnownRoutePart(
     return writeRouteIntoCache(
       now,
       pathname as NormalizedPathname,
+      nextUrl,
       fullTree,
       metadataVaryPath,
       couldBeIntercepted,
@@ -450,6 +461,7 @@ function discoverKnownRoutePart(
     entry = writeRouteIntoCache(
       now,
       pathname as NormalizedPathname,
+      nextUrl,
       fullTree,
       metadataVaryPath,
       couldBeIntercepted,

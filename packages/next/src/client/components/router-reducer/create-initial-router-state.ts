@@ -8,7 +8,10 @@ import { getFlightDataPartsFromPath } from '../../flight-data-helpers'
 import { createInitialCacheNodeForHydration } from './ppr-navigations'
 import { convertRootFlightRouterStateToRouteTree } from '../segment-cache/cache'
 import { discoverKnownRoute } from '../segment-cache/optimistic-routes'
-import type { NormalizedSearch } from '../segment-cache/cache-key'
+import type {
+  NormalizedNextUrl,
+  NormalizedSearch,
+} from '../segment-cache/cache-key'
 
 export interface InitialRouterStateParameters {
   navigatedAt: number
@@ -69,6 +72,11 @@ export function createInitialRouterState({
     initialHead
   )
 
+  // the || operator is intentional, the pathname can be an empty string
+  const initialNextUrl: string | null =
+    (extractPathFromFlightRouterState(initialTree) || location?.pathname) ??
+    null
+
   // Learn the route pattern so we can predict it for future navigations.
   // Only do this in the browser (location !== null) since route learning
   // state doesn't persist from SSR to client.
@@ -76,6 +84,7 @@ export function createInitialRouterState({
     discoverKnownRoute(
       Date.now(),
       location.pathname,
+      initialNextUrl as NormalizedNextUrl | null,
       null, // No pending entry
       initialRouteTree,
       metadataVaryPath,
@@ -119,10 +128,7 @@ export function createInitialRouterState({
     },
     canonicalUrl,
     renderedSearch: initialRenderedSearch,
-    // the || operator is intentional, the pathname can be an empty string
-    nextUrl:
-      (extractPathFromFlightRouterState(initialTree) || location?.pathname) ??
-      null,
+    nextUrl: initialNextUrl,
     previousNextUrl: null,
     debugInfo: null,
   }
