@@ -1812,6 +1812,8 @@ function App<T>({
     initialRenderedSearch: response.q,
     initialCouldBeIntercepted: response.i,
     initialPrerendered: response.S,
+    initialStaleTime: undefined,
+    initialHeadVaryParams: null,
     // location is not initialized in the SSR render
     // it's set to window.location during hydration
     location: null,
@@ -1877,6 +1879,8 @@ function ErrorApp<T>({
     initialRenderedSearch: response.q,
     initialCouldBeIntercepted: response.i,
     initialPrerendered: response.S,
+    initialStaleTime: undefined,
+    initialHeadVaryParams: null,
     // location is not initialized in the SSR render
     // it's set to window.location during hydration
     location: null,
@@ -5151,6 +5155,9 @@ async function prerenderToStream(
         res.statusCode === 404
       )
 
+      const staleTimeIterable = new StaleTimeIterable()
+      finalAttemptRSCPayload.s = staleTimeIterable
+
       const serverDynamicTracking = createDynamicTrackingState(
         isDebugDynamicAccesses
       )
@@ -5177,6 +5184,12 @@ async function prerenderToStream(
         hmrRefreshHash: undefined,
         varyParamsAccumulator,
       })
+
+      trackStaleTime(
+        finalServerPrerenderStore,
+        staleTimeIterable,
+        selectStaleTime
+      )
 
       let prerenderIsPending = true
       const reactServerResult = (reactServerPrerenderResult =
@@ -5217,18 +5230,22 @@ async function prerenderToStream(
               return prerenderResult
             },
             async () => {
-              // Now that the prerendering is complete, we know which vary
-              // params were used to compute the response. Resolve the vary
-              // params thenable so it can be sent to the client. The timing
-              // here is important: the thenable was included in the Flight
-              // payload, but it can only be serialized at the very end, after
-              // all the components have finished.
+              // Now that the prerendering is complete, we know the final
+              // stale time and vary params. Close the stale time iterable
+              // and resolve the vary params thenable so Flight can serialize
+              // their values into the stream. The timing here is important:
+              // both were included in the Flight payload, but they can only
+              // be serialized at the very end, after all the components have
+              // finished.
               //
-              // We resolve the accumulator directly here instead of reading from
-              // the work unit store because this callback runs in a separate
+              // We resolve these directly here instead of reading from the
+              // work unit store because this callback runs in a separate
               // task (via setTimeout) and may not have access to the async
               // storage context.
-              await finishAccumulatingVaryParams(varyParamsAccumulator)
+              await Promise.all([
+                finishStaleTimeTracking(staleTimeIterable),
+                finishAccumulatingVaryParams(varyParamsAccumulator),
+              ])
 
               if (finalServerReactController.signal.aborted) {
                 // If the server controller is already aborted we must have called something
