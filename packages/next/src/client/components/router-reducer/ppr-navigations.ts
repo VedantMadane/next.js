@@ -1553,6 +1553,7 @@ async function fetchMissingDynamicData(
     if (routeCacheEntry !== null && result.staticStageResponse !== null) {
       writeStaticStageResponseIntoCache(
         result.staticStageResponse,
+        result.responseHeaders,
         routeCacheEntry
       )
     }
