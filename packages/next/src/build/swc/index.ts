@@ -194,11 +194,6 @@ export function getBindingsSync(): Binding {
   return loadedBindings
 }
 
-/** Returns the loaded bindings if they are available. Otherwise returns `undefined` */
-export function tryGetBindingsSync(): Binding | undefined {
-  return loadedBindings
-}
-
 /**
  * Loads the native or wasm binding.
  *

@@ -81,6 +81,6 @@ export function getOriginalCodeFrame(
         column: frame.column1 ?? 0,
       },
     },
-    { forceColor: colors }
+    { color: colors }
   )
 }

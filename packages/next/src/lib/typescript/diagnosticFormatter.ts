@@ -378,7 +378,7 @@ export function getFormattedDiagnostic(
       {
         start: { line: line, column: character },
       },
-      { forceColor: true }
+      { color: true }
     )
     if (codeFrame) {
       message += '\n' + codeFrame

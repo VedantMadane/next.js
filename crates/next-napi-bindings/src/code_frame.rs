@@ -42,8 +42,8 @@ pub struct NapiCodeFrameOptions {
     /// Maximum width of the output (default: terminal width)
     pub max_width: Option<u32>,
     /// Whether to use ANSI colors (default: false)
-    pub force_color: Option<bool>,
-    /// Whether to highlight code syntax (default: follows forceColor)
+    pub color: Option<bool>,
+    /// Whether to highlight code syntax (default: follows color)
     pub highlight_code: Option<bool>,
     /// Optional message to display with the code frame
     pub message: Option<String>,
@@ -64,10 +64,8 @@ impl From<NapiCodeFrameOptions> for CodeFrameOptions {
             lines_above: opts.lines_above.unwrap_or(2) as usize,
             lines_below: opts.lines_below.unwrap_or(3) as usize,
             max_width: opts.max_width.map(|w| w as usize),
-            force_color: opts.force_color.unwrap_or(false),
-            highlight_code: opts
-                .highlight_code
-                .unwrap_or(opts.force_color.unwrap_or(false)),
+            color: opts.color.unwrap_or(false),
+            highlight_code: opts.highlight_code.unwrap_or(opts.color.unwrap_or(false)),
             message: opts.message,
             language: parse_language(&opts.language),
         }

@@ -13,7 +13,6 @@ import type { PagesModule } from '../server/route-modules/pages/module.compiled'
 import '../server/node-environment'
 import { installBindings } from '../build/swc/install-bindings'
 import { installCodeFrameSupport } from '../server/lib/install-code-frame'
-installCodeFrameSupport()
 
 process.env.NEXT_IS_EXPORT_WORKER = 'true'
 
@@ -336,6 +335,7 @@ export async function exportPages(
   // Load native bindings in the worker process so that code frame rendering
   // (which uses the native codeFrameColumns function) works during prerendering.
   await installBindings()
+  installCodeFrameSupport()
 
   const {
     exportPaths,

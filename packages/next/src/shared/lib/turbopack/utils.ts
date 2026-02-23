@@ -150,7 +150,7 @@ export function formatIssue(issue: Issue) {
             column: end.column + 1,
           },
         },
-        { forceColor: true }
+        { color: true }
       ).trimEnd() + '\n\n'
   }
 

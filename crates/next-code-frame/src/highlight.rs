@@ -170,17 +170,60 @@ impl ColorScheme {
 // Shared line-boundary helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the byte offset of each line start (0-indexed) in the source.
-/// The first entry is always 0 (the start of the first line).
-// TODO: use memchr to find newlines for better SIMD performance
-fn compute_line_starts(source: &str) -> Vec<usize> {
-    let mut starts = vec![0usize];
-    for (i, b) in source.bytes().enumerate() {
-        if b == b'\n' {
-            starts.push(i + 1);
+/// Precomputed line index over a source string.
+///
+/// Scans for newlines once on construction, then provides O(1) access
+/// to line content and byte ranges without allocating a `Vec<&str>`.
+pub(crate) struct Lines<'a> {
+    source: &'a str,
+    /// Byte offset of the start of each line. First entry is always 0.
+    // TODO: use memchr to find newlines for better SIMD performance
+    line_starts: Vec<usize>,
+}
+
+impl<'a> Lines<'a> {
+    /// Build the line index by scanning for newlines (single O(n) pass).
+    pub fn new(source: &'a str) -> Self {
+        let mut line_starts = vec![0usize];
+        for (i, b) in source.bytes().enumerate() {
+            if b == b'\n' {
+                line_starts.push(i + 1);
+            }
+        }
+        Self {
+            source,
+            line_starts,
         }
     }
-    starts
+
+    /// Number of lines.
+    pub fn len(&self) -> usize {
+        self.line_starts.len()
+    }
+
+    /// The full source string.
+    pub fn source(&self) -> &'a str {
+        self.source
+    }
+
+    /// The raw line-start offsets (for passing to highlight internals).
+    pub fn starts(&self) -> &[usize] {
+        &self.line_starts
+    }
+
+    /// Get the content of line `idx` (0-indexed), stripping trailing `\r\n` / `\n`.
+    pub fn content(&self, idx: usize) -> &'a str {
+        let (start, end) = self.byte_bounds(idx);
+        let line = &self.source[start..end];
+        line.strip_suffix("\r\n")
+            .or_else(|| line.strip_suffix('\n'))
+            .unwrap_or(line)
+    }
+
+    /// Byte range `[start, end)` for line `idx` (including the newline terminator).
+    pub fn byte_bounds(&self, idx: usize) -> (usize, usize) {
+        line_bounds(&self.line_starts, self.source.len(), idx)
+    }
 }
 
 /// Look up which line (0-indexed) a byte offset falls on via binary search.
@@ -264,11 +307,12 @@ fn add_span(
 ///   are only produced for lines within this range. Pass `0..usize::MAX` to produce markers for all
 ///   lines.
 pub fn extract_highlights(
-    source: &str,
+    lines: &Lines<'_>,
     line_range: Range<usize>,
     language: Language,
 ) -> Vec<Vec<StyleSpan>> {
-    let line_starts = compute_line_starts(source);
+    let line_starts = lines.starts();
+    let source = lines.source();
     let line_count = line_starts.len();
 
     let byte_range = {
@@ -279,7 +323,7 @@ pub fn extract_highlights(
         };
 
         let end_byte = if line_range.end < line_count {
-            line_bounds(&line_starts, source.len(), line_range.end).0
+            line_bounds(line_starts, source.len(), line_range.end).0
         } else {
             source.len()
         };
@@ -287,7 +331,7 @@ pub fn extract_highlights(
         (start_byte, end_byte)
     };
 
-    let all_spans = extract_markers(source, &line_starts, byte_range, language);
+    let all_spans = extract_markers(source, line_starts, byte_range, language);
 
     debug_assert!(
         all_spans.windows(2).all(|w| w[0].start <= w[1].start),
@@ -297,7 +341,7 @@ pub fn extract_highlights(
         all_spans.windows(2).all(|w| w[0].end <= w[1].start),
         "spans should be non-overlapping"
     );
-    group_spans_by_line(&all_spans, &line_starts, source, line_range)
+    group_spans_by_line(&all_spans, line_starts, source, line_range)
 }
 
 // ---------------------------------------------------------------------------
@@ -624,10 +668,11 @@ fn scan_tokens(
                 } else if ch == b'}'
                     && let Some(ref mut depth) = brace_depth
                 {
-                    *depth -= 1;
-                    if *depth == 0 {
+                    // test first to avoid underflow
+                    if *depth <= 1 {
                         return end;
                     }
+                    *depth -= 1;
                 }
                 last_token = LastToken::Operator;
             }
@@ -664,7 +709,7 @@ fn scan_tokens(
             _ => {}
         }
 
-        debug_assert!(
+        assert!(
             raw_end > pos,
             "TOKEN_RE produced a zero-width match at byte {pos}"
         );
@@ -856,7 +901,7 @@ pub mod tests {
     #[test]
     fn test_apply_line_highlights_basic() {
         let source = "const Foo = 123";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         let color_scheme = ColorScheme::colored();
 
         let result = apply_line_highlights(source, &highlights[0], &color_scheme, 0, 0);
@@ -870,7 +915,7 @@ pub mod tests {
     #[test]
     fn test_apply_line_highlights_plain() {
         let source = "const foo = 123";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         let color_scheme = ColorScheme::plain();
 
         let result = apply_line_highlights(source, &highlights[0], &color_scheme, 0, 0);
@@ -880,7 +925,7 @@ pub mod tests {
     #[test]
     fn test_only_capitalized_identifiers_highlighted() {
         let source = "const foo = Bar";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         let has_identifier = highlights[0]
             .iter()
@@ -909,7 +954,7 @@ pub mod tests {
     #[test]
     fn test_apply_line_highlights_with_truncation() {
         let source = "const Foo = 123";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         let color_scheme = ColorScheme::colored();
 
         // Truncate to show "Foo = 123" (offset 6, length 9, no prefix)
@@ -930,7 +975,7 @@ pub mod tests {
         // Truncating at offset 15 lands inside the string ("o world";)
         let source = r#"const x = "hello world";"#;
         let truncation_offset = 15;
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         let color_scheme = ColorScheme::colored();
 
         let visible = &source[truncation_offset..];
@@ -950,7 +995,7 @@ pub mod tests {
     #[test]
     fn test_comments_and_numbers() {
         let source = "const x = 42; // comment\nobj.foo = 10;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         assert_eq!(highlights.len(), 2);
 
@@ -972,7 +1017,7 @@ pub mod tests {
     #[test]
     fn test_multiline_comment() {
         let source = "const x = 1;\n/* multi\n   line */\nconst y = 2;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         assert_eq!(highlights.len(), 4);
 
@@ -990,7 +1035,7 @@ pub mod tests {
     #[test]
     fn test_multiline_template_literal() {
         let source = "const x = `line1\nline2\nline3`;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         assert_eq!(highlights.len(), 3);
 
@@ -1009,7 +1054,7 @@ pub mod tests {
         // `hello ${name}!` should mark `hello ` and `!` as string,
         // but NOT mark `name` as string.
         let source = "const x = `hello ${name}!`;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         let string_spans: Vec<(usize, usize)> = highlights[0]
             .iter()
@@ -1040,7 +1085,7 @@ pub mod tests {
     fn test_template_literal_nested() {
         // Nested template literal: `a ${`b ${c}`} d`
         let source = r#"const x = `a ${`b ${c}`} d`;"#;
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         // Should not panic and should produce some markers
         assert!(!highlights.is_empty());
@@ -1059,7 +1104,7 @@ pub mod tests {
         // `hello ${name` — the `${` is never closed with `}`
         // Should not panic; the string part before `${` should still be marked.
         let source = "const x = `hello ${name";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         assert!(!highlights.is_empty(), "Should produce highlights");
 
         // Should have at least one string marker for the "`hello " part
@@ -1083,7 +1128,7 @@ pub mod tests {
     fn test_template_brace_in_string_inside_expression() {
         // `${ "}" }` — the `}` inside the string should not close the expression
         let source = r#"const x = `${  "}" } end`;"#;
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         assert!(!highlights.is_empty());
 
         // The " end" part after the real closing } should be marked as string
@@ -1101,7 +1146,7 @@ pub mod tests {
     fn test_template_empty_expression() {
         // `hello ${}world` — empty expression hole
         let source = "const x = `hello ${}world`;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
         assert!(!highlights.is_empty());
 
         // Both "hello " and "world" parts should be string-marked
@@ -1121,7 +1166,7 @@ pub mod tests {
     fn test_line_range_filtering() {
         let source = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;";
 
-        let highlights = extract_highlights(source, 1..4, JS);
+        let highlights = extract_highlights(&Lines::new(source), 1..4, JS);
 
         assert_eq!(highlights.len(), 3);
         assert!(highlights.iter().all(|h| !h.is_empty()));
@@ -1134,7 +1179,7 @@ pub mod tests {
     #[test]
     fn test_regex_after_equals() {
         let source = "const re = /foo/gi;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         let has_regex = highlights[0]
             .iter()
@@ -1146,7 +1191,7 @@ pub mod tests {
     fn test_division_not_regex() {
         // After an identifier, `/` is division not regex
         let source = "const x = a / b / c;";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         let has_regex = highlights[0]
             .iter()
@@ -1161,7 +1206,7 @@ pub mod tests {
     #[test]
     fn test_js_keywords_highlighted() {
         let source = "const foo = function() { return true; }";
-        let highlights = extract_highlights(source, 0..usize::MAX, JS);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, JS);
 
         let keyword_starts: Vec<usize> = highlights[0]
             .iter()
@@ -1191,7 +1236,7 @@ pub mod tests {
     #[test]
     fn test_css_no_keywords() {
         let source = "const foo = function() { return true; }";
-        let highlights = extract_highlights(source, 0..usize::MAX, Language::Css);
+        let highlights = extract_highlights(&Lines::new(source), 0..usize::MAX, Language::Css);
 
         let has_keyword = highlights[0]
             .iter()

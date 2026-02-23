@@ -1,8 +1,10 @@
+use std::{fmt::Write, ops::Range};
+
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
 use crate::{
-    highlight::{ColorScheme, Language, apply_line_highlights, extract_highlights},
+    highlight::{ColorScheme, Language, Lines, apply_line_highlights, extract_highlights},
     terminal::get_terminal_width,
 };
 
@@ -37,8 +39,8 @@ pub struct CodeFrameOptions {
     pub lines_above: usize,
     /// Number of lines to show after the error
     pub lines_below: usize,
-    /// Whether to use color output (named forceColor in the JS API)
-    pub force_color: bool,
+    /// Whether to use ANSI color output
+    pub color: bool,
     /// Whether to attempt syntax highlighting
     pub highlight_code: bool,
     /// Optional message to display with the error
@@ -55,8 +57,8 @@ impl Default for CodeFrameOptions {
         Self {
             lines_above: 2,
             lines_below: 3,
-            force_color: true,
-            highlight_code: true,
+            color: false,
+            highlight_code: false,
             message: None,
             max_width: None,
             language: Language::default(),
@@ -75,49 +77,35 @@ struct TruncationResult {
     prefix_len: usize,
 }
 
-fn calculate_marker_position(
-    location_start_column: usize,
-    end_column: usize,
-    line_length: usize,
-    line_idx: usize,
-    start_line: usize,
-    end_line: usize,
-    column_offset: usize,
-    available_code_width: usize,
+/// Convert a source-column range to display coordinates, accounting for
+/// line truncation and available width.
+///
+/// Returns `(display_col, display_length)` where `display_col` is the
+/// number of leading spaces before the `^` markers.
+fn marker_display_position(
+    col_start: usize,
+    col_end: usize,
+    truncation_offset: usize,
+    available_width: usize,
 ) -> (usize, usize) {
-    // Determine the column range to mark on this line using half-open [start, end)
-    let (range_start, range_end) = if start_line == end_line {
-        (location_start_column, end_column)
-    } else if line_idx == start_line {
-        (location_start_column, line_length)
-    } else {
-        (1, end_column)
-    };
-
-    // Clamp: columns are 1-indexed, max valid position is line_length + 1 (one past last char)
-    let range_start = range_start.min(line_length + 1);
-    let range_end = range_end.min(line_length + 2);
-
-    // Calculate marker position accounting for truncation
-    // When column_offset > 0, visible content is "...XXXXX" where X starts at column_offset
-    // Display positions: columns 1-3 are "...", column 4 corresponds to original column_offset
-    let marker_col = if column_offset > 0 {
-        if range_start < column_offset {
+    // Map source column to display column, accounting for "..." prefix
+    let display_col = if truncation_offset > 0 {
+        if col_start <= truncation_offset {
             ELLIPSIS_DISPLAY_OFFSET
         } else {
-            (range_start - column_offset) + ELLIPSIS_DISPLAY_OFFSET
+            (col_start - truncation_offset) + ELLIPSIS_DISPLAY_OFFSET
         }
     } else {
-        range_start.max(1)
+        col_start.max(1)
     };
 
-    // marker_col is 1-indexed, so (marker_col - 1) chars precede the marker
-    let marker_length = range_end
-        .saturating_sub(range_start)
+    // Marker length: at least 1 caret, clamped to available width
+    let length = col_end
+        .saturating_sub(col_start)
         .max(1)
-        .min(available_code_width.saturating_sub(marker_col - 1));
+        .min(available_width.saturating_sub(display_col.saturating_sub(1)));
 
-    (marker_col, marker_length)
+    (display_col, length)
 }
 
 /// Renders a code frame showing the location of an error in source code
@@ -130,12 +118,10 @@ pub fn render_code_frame(
         return Ok(String::new());
     }
 
-    // split('\n') preserves trailing empty lines (unlike str::lines()) and
-    // strip_suffix handles \r\n endings.
-    let lines: Vec<&str> = source
-        .split('\n')
-        .map(|l| l.strip_suffix('\r').unwrap_or(l))
-        .collect();
+    // Single O(n) scan to compute line-start offsets. This replaces both the
+    // Vec<&str> allocation that split('\n').collect() would produce and the
+    // duplicate scan inside extract_highlights.
+    let lines = Lines::new(source);
 
     // Validate location (convert 1-indexed to 0-indexed)
     let start_line_idx = location.start.line.saturating_sub(1);
@@ -166,7 +152,7 @@ pub fn render_code_frame(
 
     let line_highlights = if options.highlight_code {
         Some(extract_highlights(
-            source,
+            &lines,
             first_line_idx..last_line_idx,
             options.language,
         ))
@@ -187,13 +173,14 @@ pub fn render_code_frame(
     }
 
     let truncation_offset = calculate_truncation_offset(
-        &lines[first_line_idx..last_line_idx],
+        &lines,
+        first_line_idx..last_line_idx,
         start_column.unwrap_or(0),
         end_column.unwrap_or(0),
         available_code_width,
     );
 
-    let color_scheme = if options.force_color {
+    let color_scheme = if options.color {
         ColorScheme::colored()
     } else {
         ColorScheme::plain()
@@ -208,19 +195,15 @@ pub fn render_code_frame(
     if let Some(ref message) = options.message
         && start_column.is_none()
     {
-        output.push_str(&" ".repeat(gutter_total_width));
+        output.extend(std::iter::repeat_n(' ', gutter_total_width));
         output.push_str(color_scheme.message);
         output.push_str(message);
         output.push_str(color_scheme.reset);
         needs_newline = true;
     }
 
-    for (line_idx, line_content) in lines
-        .iter()
-        .enumerate()
-        .take(last_line_idx)
-        .skip(first_line_idx)
-    {
+    for line_idx in first_line_idx..last_line_idx {
+        let line_content = lines.content(line_idx);
         let is_error_line = line_idx >= start_line_idx && line_idx <= end_line_idx;
         let line_num = line_idx + 1;
 
@@ -257,7 +240,7 @@ pub fn render_code_frame(
         }
         output.push(' ');
         output.push_str(color_scheme.gutter);
-        output.push_str(&format!("{:>width$} |", line_num, width = gutter_width));
+        write!(output, "{:>width$} |", line_num, width = gutter_width).unwrap();
         output.push_str(color_scheme.reset);
         if !visible_content.is_empty() {
             output.push(' ');
@@ -266,24 +249,40 @@ pub fn render_code_frame(
 
         // Add marker line if this is an error line with column info
         if is_error_line && let Some(start_col) = start_column {
-            let (marker_col, marker_length) = calculate_marker_position(
-                start_col,
-                end_column.unwrap_or(start_col + 1),
-                line_content.len(),
-                line_idx,
-                start_line_idx,
-                end_line_idx,
+            let end_col = end_column.unwrap_or(start_col + 1);
+            let line_len = line_content.len();
+
+            // Determine which columns to underline on this error line
+            let (col_start, col_end) = if start_line_idx == end_line_idx {
+                (start_col, end_col)
+            } else if line_idx == start_line_idx {
+                (start_col, line_len)
+            } else if line_idx == end_line_idx {
+                (1, end_col)
+            } else {
+                (1, line_len + 1) // intermediate line: underline everything
+            };
+
+            // Clamp to line bounds (1-indexed)
+            let col_start = col_start.min(line_len + 1);
+            let col_end = col_end.min(line_len + 2);
+
+            // project into display space
+            let (marker_col, marker_length) = marker_display_position(
+                col_start,
+                col_end,
                 truncation.byte_offset,
                 available_code_width,
             );
 
             output.push_str("\n  ");
             output.push_str(color_scheme.gutter);
-            output.push_str(&format!("{:>width$} |", "", width = gutter_width));
+            write!(output, "{:>width$} |", "", width = gutter_width).unwrap();
+
             output.push_str(color_scheme.reset);
-            output.push_str(&" ".repeat(marker_col));
+            output.extend(std::iter::repeat_n(' ', marker_col));
             output.push_str(color_scheme.marker);
-            output.push_str(&"^".repeat(marker_length));
+            output.extend(std::iter::repeat_n('^', marker_length));
             output.push_str(color_scheme.reset);
 
             if line_idx == end_line_idx
@@ -302,8 +301,8 @@ pub fn render_code_frame(
 
 const ELLIPSIS: &str = "...";
 const SEPARATOR: &str = " | ";
-/// Display offset for content after an ellipsis prefix: `ELLIPSIS.len() + 1` (for 1-indexing)
-const ELLIPSIS_DISPLAY_OFFSET: usize = 4;
+/// Display offset for content after an ellipsis prefix
+const ELLIPSIS_DISPLAY_OFFSET: usize = ELLIPSIS.len() + 1;
 
 /// Calculate the truncation offset (in bytes) for all lines in the window.
 /// This ensures all lines are "scrolled" to the same horizontal position, centering the error
@@ -311,13 +310,16 @@ const ELLIPSIS_DISPLAY_OFFSET: usize = 4;
 // TODO: use a display-width crate (e.g. `unicode-width`) instead of byte length
 // for correct CJK / emoji column counting.
 fn calculate_truncation_offset(
-    lines: &[&str],
+    lines: &Lines<'_>,
+    window: Range<usize>,
     start_column: usize,
     end_column: usize,
     available_width: usize,
 ) -> usize {
     // Check if any line in the window needs truncation
-    let needs_truncation = lines.iter().any(|line| line.len() > available_width);
+    let needs_truncation = window
+        .clone()
+        .any(|i| lines.content(i).len() > available_width);
 
     // All lines are short enough or we don't have an error column so start at beginning
     if !needs_truncation || start_column == 0 {

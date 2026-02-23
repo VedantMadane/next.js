@@ -26,7 +26,7 @@ export function getScssError(
         frame = codeFrameColumns(
           fileContent,
           { start: { line: lineNumber, column } },
-          { forceColor: true, language: 'css' }
+          { color: true, language: 'css' }
         )
       } catch {}
     }
