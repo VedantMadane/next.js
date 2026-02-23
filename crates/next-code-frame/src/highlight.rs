@@ -177,18 +177,15 @@ impl ColorScheme {
 pub(crate) struct Lines<'a> {
     source: &'a str,
     /// Byte offset of the start of each line. First entry is always 0.
-    // TODO: use memchr to find newlines for better SIMD performance
     line_starts: Vec<usize>,
 }
 
 impl<'a> Lines<'a> {
-    /// Build the line index by scanning for newlines (single O(n) pass).
+    /// Build the line index by scanning for newlines.
     pub fn new(source: &'a str) -> Self {
         let mut line_starts = vec![0usize];
-        for (i, b) in source.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(i + 1);
-            }
+        for pos in memchr::memchr_iter(b'\n', source.as_bytes()) {
+            line_starts.push(pos + 1);
         }
         Self {
             source,
@@ -268,6 +265,8 @@ fn add_span(
     let end_line = lookup_line(line_starts, end.saturating_sub(1));
 
     if start_line != end_line {
+        // If the location spans lines, we break the style so each is contained within a line, this
+        // makes our line oritented drawing algorithm simpler.
         for line_idx in start_line..=end_line {
             let (line_start, line_end) = line_bounds(line_starts, source_len, line_idx);
             let span_start = start.max(line_start);
